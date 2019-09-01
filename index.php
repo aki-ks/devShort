@@ -2,22 +2,39 @@
 
 // All relevant changes can be made in the data file. Please read the docs: https://github.com/flokX/devShort/wiki
 
-$base_path = implode(DIRECTORY_SEPARATOR, array(__DIR__, "admin"));
-$config_content = json_decode(file_get_contents($base_path . DIRECTORY_SEPARATOR . "config.json"), true);
+$config_path = __DIR__ . DIRECTORY_SEPARATOR . "config.json";
+$config_content = json_decode(file_get_contents($config_path), true);
+$stats_path = __DIR__ . DIRECTORY_SEPARATOR . "stats.json";
+$stats_content = json_decode(file_get_contents($stats_path), true);
 
-// Counts the access
-$filename = $base_path . DIRECTORY_SEPARATOR . "stats.json";
-$stats = json_decode(file_get_contents($filename), true);
-$stats["Index"][mktime(0, 0, 0)] += 1;
-file_put_contents($filename, json_encode($stats, JSON_PRETTY_PRINT));
+// Filter the names that the admin interface doesn't break
+function filter_name($nameRaw) {
+    $name = filter_var($nameRaw, FILTER_SANITIZE_STRING);
+    $name = str_replace(" ", "-", $name);
+    $name = preg_replace("/[^A-Za-z0-9-_]/", "", $name);
+    return $name;
+}
 
-// Generator for page customization
-$links_string = "";
-if ($config_content["settings"]["custom_links"]) {
-    foreach ($config_content["settings"]["custom_links"] as $name => $url) {
-        $links_string = $links_string . "<a href=\"$url\" class=\"badge badge-secondary\">$name</a> ";
+// API functions to delete and add the shortlinks via the admin panel
+if (isset($_GET["delete"]) || isset($_GET["add"])) {
+    $data = json_decode(file_get_contents("php://input"), true);
+    if (isset($_GET["delete"])) {
+        unset($config_content[$data["name"]]);
+        unset($stats_content[$data["name"]]);
+    } else if (isset($_GET["add"])) {
+        $filtered = array("name" => filter_name($data["name"]),
+                          "url" => filter_var($data["url"], FILTER_SANITIZE_URL));
+        if (!filter_var($filtered["url"], FILTER_VALIDATE_URL)) {
+            echo "{\"status\": \"unvalid-url\"}";
+            exit;
+        }
+        $config_content[$filtered["name"]] = $filtered["url"];
+        $stats_content[$filtered["name"]] = array();
     }
-    $links_string = substr($links_string, 0, -1);
+    file_put_contents($config_path, json_encode($config_content, JSON_PRETTY_PRINT));
+    file_put_contents($stats_path, json_encode($stats_content, JSON_PRETTY_PRINT));
+    echo "{\"status\": \"successful\"}";
+    exit;
 }
 
 ?>
@@ -29,44 +46,40 @@ if ($config_content["settings"]["custom_links"]) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
     <meta name="robots" content="noindex, nofollow">
-    <meta name="author" content="<?php echo $config_content["settings"]["author"]; ?> and the devShort team">
-    <link href="<?php echo $config_content["settings"]["favicon"]; ?>" rel="icon">
-    <title><?php echo $config_content["settings"]["name"]; ?></title>
-    <link href="assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
-    <link href="assets/main.css" rel="stylesheet">
+    <link href="../assets/icon.png" rel="icon">
+    <title>Admin panel</title>
+    <link href="../assets/vendor/bootstrap/bootstrap.min.css" rel="stylesheet">
+    <link href="../assets/main.css" rel="stylesheet">
 </head>
 
 <body class="d-flex flex-column h-100">
 
     <main class="flex-shrink-0">
         <div class="container">
-            <nav class="mt-3" aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="<?php echo $config_content["settings"]["home_link"]; ?>">Home</a></li>
-                    <li class="breadcrumb-item" aria-current="page"><?php echo $config_content["settings"]["name"]; ?></li>
-                </ol>
-            </nav>
-            <h1 class="mt-5"><?php echo $config_content["settings"]["name"]; ?></h1>
-            <p class="lead">This is a shortlink service. You need a valid shortlink to get redirected.</p>
-            <ul class="list-inline">
-                <li class="list-inline-item"><a href="https://github.com/flokX/devShort/wiki/What-is-URL-shortening%3F">What is URL shortening?</a></li>
-                <li class="list-inline-item">-</li>
-                <li class="list-inline-item"><a href="<?php echo $config_content["settings"]["home_link"]; ?>">Home page</a></li>
-                <li class="list-inline-item">-</li>
-                <li class="list-inline-item"><a href="admin">Admin panel</a></li>
-            </ul>
+            <div class="card mt-3 mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">Add shortlink <small><a class="card-link" id="refresh" href="#refresh">Refresh charts</a></small></h5>
+                    <form class="form-inline" id="add-form">
+                        <label class="sr-only" for="name">Name</label>
+                        <input class="form-control mb-2 mr-sm-2" id="name" type="text" placeholder="Link1" required>
+                        <label class="sr-only" for="url">URL (destination)</label>
+                        <input class="form-control mb-2 mr-sm-2" id="url" type="url" placeholder="https://example.com" required>
+                        <button class="btn btn-primary mb-2" type="submit">Add</button>
+                        <div id="status"></div>
+                    </form>
+                </div>
+            </div>
+            <div class="d-flex justify-content-center">
+                <div class="spinner-border text-primary" id="spinner" role="status">
+                    <span class="sr-only">Loading...</span>
+                </div>
+            </div>
+            <div id="charts"></div>
         </div>
     </main>
 
-    <footer class="footer mt-auto py-3 bg-light">
-        <div class="container">
-            <div class="d-flex justify-content-between align-items-center">
-                <span class="text-muted">&copy; <?php echo date("Y") . " " . $config_content["settings"]["author"]; ?> and <a href="https://github.com/flokX/devShort">devShort</a></span>
-                <?php if ($links_string) { echo "<span class=\"text-muted\">$links_string</span>"; } ?>
-            </div>
-        </div>
-    </footer>
-
+    <script src="../assets/vendor/frappe-charts/frappe-charts.min.iife.js"></script>
+    <script src="main.js"></script>
 </body>
 
 </html>

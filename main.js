@@ -63,7 +63,7 @@ function getCharts() {
     }).then(function (json) {
         for (let [name, data] of Object.entries(json)) {
             chartsDiv.insertAdjacentHTML('beforeend', `<div id="card-${name}" class="card text-center mb-3">
-    <div class="card-header">${name}</div>
+    <div class="card-header"><a href="/${name}">${name}</a></div>
     <div class="card-body p-2">
         <div id="heatmap-${name}" class="overflow-auto"></div>
     </div>
